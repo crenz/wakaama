@@ -153,18 +153,19 @@ static lwm2m_watcher_t * prv_getWatcher(lwm2m_context_t * contextP,
     return watcherP;
 }
 
-coap_status_t handle_observe_request(lwm2m_context_t * contextP,
-                                     lwm2m_uri_t * uriP,
-                                     lwm2m_server_t * serverP,
-                                     int size,
-                                     lwm2m_data_t * dataP,
-                                     coap_packet_t * message,
-                                     coap_packet_t * response)
+coap_status_t observe_handleRequest(lwm2m_context_t * contextP,
+                                    lwm2m_uri_t * uriP,
+                                    lwm2m_server_t * serverP,
+                                    int size,
+                                    lwm2m_data_t * dataP,
+                                    coap_packet_t * message,
+                                    coap_packet_t * response)
 {
     lwm2m_watcher_t * watcherP;
     uint32_t count;
 
-    LOG("handle_observe_request()\r\n");
+    LOG_ARG("Code: %02X, server status: %s", message->code, STR_STATUS(serverP->status));
+    LOG_URI(uriP);
 
     coap_get_header_observe(message, &count);
 
@@ -184,7 +185,7 @@ coap_status_t handle_observe_request(lwm2m_context_t * contextP,
 
         if (LWM2M_URI_IS_SET_RESOURCE(uriP))
         {
-            switch (dataP->dataType)
+            switch (dataP->type)
             {
             case LWM2M_TYPE_INTEGER:
                 if (1 != lwm2m_data_decode_int(dataP, &(watcherP->lastValue.asInteger))) return COAP_500_INTERNAL_SERVER_ERROR;
@@ -203,7 +204,7 @@ coap_status_t handle_observe_request(lwm2m_context_t * contextP,
 
     case 1:
         // cancellation
-        cancel_observe(contextP, LWM2M_MAX_ID, serverP->sessionH);
+        observe_cancel(contextP, LWM2M_MAX_ID, serverP->sessionH);
         return COAP_205_CONTENT;
 
     default:
@@ -211,13 +212,13 @@ coap_status_t handle_observe_request(lwm2m_context_t * contextP,
     }
 }
 
-void cancel_observe(lwm2m_context_t * contextP,
+void observe_cancel(lwm2m_context_t * contextP,
                     uint16_t mid,
                     void * fromSessionH)
 {
     lwm2m_observed_t * observedP;
 
-    LOG("cancel_observe()\r\n");
+    LOG_ARG("mid: %d", mid);
 
     for (observedP = contextP->observedList;
          observedP != NULL;
@@ -261,15 +262,17 @@ void cancel_observe(lwm2m_context_t * contextP,
     }
 }
 
-coap_status_t observe_set_parameters(lwm2m_context_t * contextP,
-                                     lwm2m_uri_t * uriP,
-                                     lwm2m_server_t * serverP,
-                                     lwm2m_attributes_t * attrP)
+coap_status_t observe_setParameters(lwm2m_context_t * contextP,
+                                    lwm2m_uri_t * uriP,
+                                    lwm2m_server_t * serverP,
+                                    lwm2m_attributes_t * attrP)
 {
     uint8_t result;
     lwm2m_watcher_t * watcherP;
 
-    LOG("observe_set_parameters()\r\n");
+    LOG_URI(uriP);
+    LOG_ARG("toSet: %08X, toClear: %08X, minPeriod: %d, maxPeriod: %d, greaterThan: %f, lessThan: %f, step: %f",
+            attrP->toSet, attrP->toClear, attrP->minPeriod, attrP->maxPeriod, attrP->greaterThan, attrP->lessThan, attrP->step);
 
     if (!LWM2M_URI_IS_SET_INSTANCE(uriP) && LWM2M_URI_IS_SET_RESOURCE(uriP)) return COAP_400_BAD_REQUEST;
 
@@ -354,7 +357,40 @@ coap_status_t observe_set_parameters(lwm2m_context_t * contextP,
         }
     }
 
+    LOG_ARG("Final toSet: %08X, minPeriod: %d, maxPeriod: %d, greaterThan: %f, lessThan: %f, step: %f",
+            watcherP->parameters->toSet, watcherP->parameters->minPeriod, watcherP->parameters->maxPeriod, watcherP->parameters->greaterThan, watcherP->parameters->lessThan, watcherP->parameters->step);
+
     return COAP_204_CHANGED;
+}
+
+lwm2m_observed_t * observe_findByUri(lwm2m_context_t * contextP,
+                                     lwm2m_uri_t * uriP)
+{
+    lwm2m_observed_t * targetP;
+
+    LOG_URI(uriP);
+    targetP = contextP->observedList;
+    while (targetP != NULL)
+    {
+        if (targetP->uri.objectId == uriP->objectId)
+        {
+            if ((!LWM2M_URI_IS_SET_INSTANCE(uriP) && !LWM2M_URI_IS_SET_INSTANCE(&(targetP->uri)))
+             || (LWM2M_URI_IS_SET_INSTANCE(uriP) && LWM2M_URI_IS_SET_INSTANCE(&(targetP->uri)) && (uriP->instanceId == targetP->uri.instanceId)))
+             {
+                 if ((!LWM2M_URI_IS_SET_RESOURCE(uriP) && !LWM2M_URI_IS_SET_RESOURCE(&(targetP->uri)))
+                     || (LWM2M_URI_IS_SET_RESOURCE(uriP) && LWM2M_URI_IS_SET_RESOURCE(&(targetP->uri)) && (uriP->resourceId == targetP->uri.resourceId)))
+                 {
+                     LOG_ARG("Found one with%s observers.", targetP->watcherList ? "" : " no");
+                     LOG_URI(&(targetP->uri));
+                     return targetP;
+                 }
+             }
+        }
+        targetP = targetP->next;
+    }
+
+    LOG("Found nothing");
+    return NULL;
 }
 
 void lwm2m_resource_value_changed(lwm2m_context_t * contextP,
@@ -362,6 +398,7 @@ void lwm2m_resource_value_changed(lwm2m_context_t * contextP,
 {
     lwm2m_observed_t * targetP;
 
+    LOG_URI(uriP);
     targetP = contextP->observedList;
     while (targetP != NULL)
     {
@@ -377,9 +414,16 @@ void lwm2m_resource_value_changed(lwm2m_context_t * contextP,
                 {
                     lwm2m_watcher_t * watcherP;
 
+                    LOG("Found an observation");
+                    LOG_URI(&(targetP->uri));
+
                     for (watcherP = targetP->watcherList ; watcherP != NULL ; watcherP = watcherP->next)
                     {
-                        if ( watcherP->active == true) watcherP->update = true;
+                        if (watcherP->active == true)
+                        {
+                            LOG("Tagging a watcher");
+                            watcherP->update = true;
+                        }
                     }
                 }
             }
@@ -388,12 +432,13 @@ void lwm2m_resource_value_changed(lwm2m_context_t * contextP,
     }
 }
 
-void observation_step(lwm2m_context_t * contextP,
-                      time_t currentTime,
-                      time_t * timeoutP)
+void observe_step(lwm2m_context_t * contextP,
+                  time_t currentTime,
+                  time_t * timeoutP)
 {
     lwm2m_observed_t * targetP;
 
+    LOG("Entering");
     for (targetP = contextP->observedList ; targetP != NULL ; targetP = targetP->next)
     {
         lwm2m_watcher_t * watcherP;
@@ -408,10 +453,11 @@ void observation_step(lwm2m_context_t * contextP,
         coap_packet_t message[1];
         time_t interval;
 
+        LOG_URI(&(targetP->uri));
         if (LWM2M_URI_IS_SET_RESOURCE(&targetP->uri))
         {
-            if (COAP_205_CONTENT != object_data_read(contextP, &targetP->uri, &size, &dataP)) continue;
-            switch (dataP->dataType)
+            if (COAP_205_CONTENT != object_readData(contextP, &targetP->uri, &size, &dataP)) continue;
+            switch (dataP->type)
             {
             case LWM2M_TYPE_INTEGER:
                 if (1 != lwm2m_data_decode_int(dataP, &integerValue)) continue;
@@ -422,7 +468,7 @@ void observation_step(lwm2m_context_t * contextP,
                 storeValue = true;
                 break;
             default:
-                continue;
+                break;
             }
         }
         for (watcherP = targetP->watcherList ; watcherP != NULL ; watcherP = watcherP->next)
@@ -439,6 +485,8 @@ void observation_step(lwm2m_context_t * contextP,
                     {
                         // no conditions
                         notify = true;
+                        LOG("Notify with no conditions");
+                        LOG_URI(&(targetP->uri));
                     }
 
                     if (notify == false
@@ -447,8 +495,9 @@ void observation_step(lwm2m_context_t * contextP,
                     {
                         if ((watcherP->parameters->toSet & LWM2M_ATTR_FLAG_LESS_THAN) != 0)
                         {
+                            LOG("Checking lower treshold");
                             // Did we cross the lower treshold ?
-                            switch (dataP->dataType)
+                            switch (dataP->type)
                             {
                             case LWM2M_TYPE_INTEGER:
                                 if ((integerValue <= watcherP->parameters->lessThan
@@ -456,6 +505,7 @@ void observation_step(lwm2m_context_t * contextP,
                                  || (integerValue >= watcherP->parameters->lessThan
                                   && watcherP->lastValue.asInteger < watcherP->parameters->lessThan))
                                 {
+                                    LOG("Notify on lower treshold crossing");
                                     notify = true;
                                 }
                                 break;
@@ -465,6 +515,7 @@ void observation_step(lwm2m_context_t * contextP,
                                  || (floatValue >= watcherP->parameters->lessThan
                                   && watcherP->lastValue.asFloat < watcherP->parameters->lessThan))
                                 {
+                                    LOG("Notify on lower treshold crossing");
                                     notify = true;
                                 }
                                 break;
@@ -474,8 +525,9 @@ void observation_step(lwm2m_context_t * contextP,
                         }
                         if ((watcherP->parameters->toSet & LWM2M_ATTR_FLAG_GREATER_THAN) != 0)
                         {
+                            LOG("Checking upper treshold");
                             // Did we cross the upper treshold ?
-                            switch (dataP->dataType)
+                            switch (dataP->type)
                             {
                             case LWM2M_TYPE_INTEGER:
                                 if ((integerValue <= watcherP->parameters->greaterThan
@@ -483,6 +535,7 @@ void observation_step(lwm2m_context_t * contextP,
                                  || (integerValue >= watcherP->parameters->greaterThan
                                   && watcherP->lastValue.asInteger < watcherP->parameters->greaterThan))
                                 {
+                                    LOG("Notify on lower upper crossing");
                                     notify = true;
                                 }
                                 break;
@@ -492,6 +545,7 @@ void observation_step(lwm2m_context_t * contextP,
                                  || (floatValue >= watcherP->parameters->greaterThan
                                   && watcherP->lastValue.asFloat < watcherP->parameters->greaterThan))
                                 {
+                                    LOG("Notify on lower upper crossing");
                                     notify = true;
                                 }
                                 break;
@@ -501,7 +555,9 @@ void observation_step(lwm2m_context_t * contextP,
                         }
                         if ((watcherP->parameters->toSet & LWM2M_ATTR_FLAG_STEP) != 0)
                         {
-                            switch (dataP->dataType)
+                            LOG("Checking step");
+
+                            switch (dataP->type)
                             {
                             case LWM2M_TYPE_INTEGER:
                             {
@@ -511,6 +567,7 @@ void observation_step(lwm2m_context_t * contextP,
                                 if ((diff < 0 && (0 - diff) >= watcherP->parameters->step)
                                  || (diff >= 0 && diff >= watcherP->parameters->step))
                                 {
+                                    LOG("Notify on step condition");
                                     notify = true;
                                 }
                             }
@@ -523,6 +580,7 @@ void observation_step(lwm2m_context_t * contextP,
                                 if ((diff < 0 && (0 - diff) >= watcherP->parameters->step)
                                  || (diff >= 0 && diff >= watcherP->parameters->step))
                                 {
+                                    LOG("Notify on step condition");
                                     notify = true;
                                 }
                             }
@@ -536,6 +594,8 @@ void observation_step(lwm2m_context_t * contextP,
                     if (watcherP->parameters != NULL
                      && (watcherP->parameters->toSet & LWM2M_ATTR_FLAG_MIN_PERIOD) != 0)
                     {
+                        LOG_ARG("Checking minimal period (%d s)", watcherP->parameters->minPeriod);
+
                         if (watcherP->lastTime + watcherP->parameters->minPeriod > currentTime)
                         {
                             // Minimum Period did not elapse yet
@@ -545,6 +605,7 @@ void observation_step(lwm2m_context_t * contextP,
                         }
                         else
                         {
+                            LOG("Notify on minimal period");
                             notify = true;
                         }
                     }
@@ -555,8 +616,11 @@ void observation_step(lwm2m_context_t * contextP,
                  && watcherP->parameters != NULL
                  && (watcherP->parameters->toSet & LWM2M_ATTR_FLAG_MAX_PERIOD) != 0)
                 {
+                    LOG_ARG("Checking maximal period (%d s)", watcherP->parameters->minPeriod);
+
                     if (watcherP->lastTime + watcherP->parameters->maxPeriod <= currentTime)
                     {
+                        LOG("Notify on maximal period");
                         notify = true;
                     }
                 }
@@ -567,7 +631,7 @@ void observation_step(lwm2m_context_t * contextP,
                     {
                         if (dataP != NULL)
                         {
-                            length = lwm2m_data_serialize(size, dataP, &format, &buffer);
+                            length = lwm2m_data_serialize(&targetP->uri, size, dataP, &format, &buffer);
                             if (length == 0) break;
                         }
                         else
@@ -594,7 +658,7 @@ void observation_step(lwm2m_context_t * contextP,
                 // Store this value
                 if (notify == true && storeValue == true)
                 {
-                    switch (dataP->dataType)
+                    switch (dataP->type)
                     {
                     case LWM2M_TYPE_INTEGER:
                         watcherP->lastValue.asInteger = integerValue;
@@ -653,9 +717,10 @@ static lwm2m_observation_t * prv_findObservationByURI(lwm2m_client_t * clientP,
     return targetP;
 }
 
-void observation_remove(lwm2m_client_t * clientP,
-                        lwm2m_observation_t * observationP)
+void observe_remove(lwm2m_client_t * clientP,
+                    lwm2m_observation_t * observationP)
 {
+    LOG("Entering");
     clientP->observationList = (lwm2m_observation_t *) LWM2M_LIST_RM(clientP->observationList, observationP->id, NULL);
     lwm2m_free(observationP);
 }
@@ -671,7 +736,7 @@ static void prv_obsRequestCallback(lwm2m_transaction_t * transacP,
     {
     case STATE_DEREG_PENDING:
         // Observation was canceled by the user.
-        observation_remove(((lwm2m_client_t*)transacP->peerP), observationP);
+        observe_remove(((lwm2m_client_t*)transacP->peerP), observationP);
         return;
 
     case STATE_REG_PENDING:
@@ -703,7 +768,7 @@ static void prv_obsRequestCallback(lwm2m_transaction_t * transacP,
                                code,
                                LWM2M_CONTENT_TEXT, NULL, 0,
                                observationP->userData);
-        observation_remove(((lwm2m_client_t*)transacP->peerP), observationP);
+        observe_remove(((lwm2m_client_t*)transacP->peerP), observationP);
     }
     else
     {
@@ -749,7 +814,7 @@ static void prv_obsCancelRequestCallback(lwm2m_transaction_t * transacP,
                            cancelP->userDataP);
     }
 
-    observation_remove(((lwm2m_client_t*)transacP->peerP), cancelP->observationP);
+    observe_remove(((lwm2m_client_t*)transacP->peerP), cancelP->observationP);
 
     lwm2m_free(cancelP);
 }
@@ -765,6 +830,9 @@ int lwm2m_observe(lwm2m_context_t * contextP,
     lwm2m_transaction_t * transactionP;
     lwm2m_observation_t * observationP;
     uint8_t token[4];
+
+    LOG_ARG("clientID: %d", clientID);
+    LOG_URI(uriP);
 
     if (!LWM2M_URI_IS_SET_INSTANCE(uriP) && LWM2M_URI_IS_SET_RESOURCE(uriP)) return COAP_400_BAD_REQUEST;
 
@@ -815,6 +883,9 @@ int lwm2m_observe_cancel(lwm2m_context_t * contextP,
 {
     lwm2m_client_t * clientP;
     lwm2m_observation_t * observationP;
+
+    LOG_ARG("clientID: %d", clientID);
+    LOG_URI(uriP);
 
     clientP = (lwm2m_client_t *)lwm2m_list_find((lwm2m_list_t *)contextP->clientList, clientID);
     if (clientP == NULL) return COAP_404_NOT_FOUND;
@@ -867,7 +938,7 @@ int lwm2m_observe_cancel(lwm2m_context_t * contextP,
     return COAP_NO_ERROR;
 }
 
-bool handle_observe_notify(lwm2m_context_t * contextP,
+bool observe_handleNotify(lwm2m_context_t * contextP,
                            void * fromSessionH,
                            coap_packet_t * message,
         				   coap_packet_t * response)
@@ -880,6 +951,7 @@ bool handle_observe_notify(lwm2m_context_t * contextP,
     lwm2m_observation_t * observationP;
     uint32_t count;
 
+    LOG("Entering");
     token_len = coap_get_header_token(message, (const uint8_t **)&tokenP);
     if (token_len != sizeof(uint32_t)) return false;
 

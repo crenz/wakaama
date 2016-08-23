@@ -98,7 +98,8 @@ static void handle_reset(lwm2m_context_t * contextP,
                          coap_packet_t * message)
 {
 #ifdef LWM2M_CLIENT_MODE
-    cancel_observe(contextP, message->mid, fromSessionH);
+    LOG("Entering");
+    observe_cancel(contextP, message->mid, fromSessionH);
 #endif
 }
 
@@ -110,10 +111,12 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
     lwm2m_uri_t * uriP;
     coap_status_t result = COAP_IGNORE;
 
+    LOG("Entering");
+	
 #ifdef LWM2M_CLIENT_MODE
-    uriP = lwm2m_decode_uri(contextP->altPath, message->uri_path);
+    uriP = uri_decode(contextP->altPath, message->uri_path);
 #else
-    uriP = lwm2m_decode_uri(NULL, message->uri_path);
+    uriP = uri_decode(NULL, message->uri_path);
 #endif
 
     if (uriP == NULL) return COAP_400_BAD_REQUEST;
@@ -125,10 +128,10 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
     {
         lwm2m_server_t * serverP;
 
-        serverP = prv_findServer(contextP, fromSessionH);
+        serverP = utils_findServer(contextP, fromSessionH);
         if (serverP != NULL)
         {
-            result = handle_dm_request(contextP, uriP, serverP, message, response);
+            result = dm_handleRequest(contextP, uriP, serverP, message, response);
         }
 #ifdef LWM2M_BOOTSTRAP
         else
@@ -136,7 +139,7 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
             serverP = utils_findBootstrapServer(contextP, fromSessionH);
             if (serverP != NULL)
             {
-                result = handle_bootstrap_command(contextP, uriP, serverP, message, response);
+                result = bootstrap_handleCommand(contextP, uriP, serverP, message, response);
             }
         }
 #endif
@@ -151,14 +154,14 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
         }
         else
         {
-            result = handle_delete_all(contextP, fromSessionH);
+            result = bootstrap_handleDeleteAll(contextP, fromSessionH);
         }
         break;
 
     case LWM2M_URI_FLAG_BOOTSTRAP:
         if (message->code == COAP_POST)
         {
-            result = handle_bootstrap_finish(contextP, fromSessionH);
+            result = bootstrap_handleFinish(contextP, fromSessionH);
         }
         break;
 #endif
@@ -166,12 +169,12 @@ static coap_status_t handle_request(lwm2m_context_t * contextP,
 
 #ifdef LWM2M_SERVER_MODE
     case LWM2M_URI_FLAG_REGISTRATION:
-        result = handle_registration_request(contextP, uriP, fromSessionH, message, response);
+        result = registration_handleRequest(contextP, uriP, fromSessionH, message, response);
         break;
 #endif
 #ifdef LWM2M_BOOTSTRAP_SERVER_MODE
     case LWM2M_URI_FLAG_BOOTSTRAP:
-        result = handle_bootstrap_request(contextP, uriP, fromSessionH, message, response);
+        result = bootstrap_handleRequest(contextP, uriP, fromSessionH, message, response);
         break;
 #endif
     default:
@@ -203,11 +206,13 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
     static coap_packet_t message[1];
     static coap_packet_t response[1];
 
+    LOG("Entering");
     coap_error_code = coap_parse_message(message, buffer, (uint16_t)length);
     if (coap_error_code == NO_ERROR)
     {
-        LOG("  Parsed: ver %u, type %u, tkl %u, code %u.%.2u, mid %u\r\n", message->version, message->type, message->token_len, message->code >> 5, message->code & 0x1F, message->mid);
-        LOG("  Content type: %d\r\n  Payload: %.*s\r\n\n", message->content_type, message->payload_len, message->payload);
+        LOG_ARG("Parsed: ver %u, type %u, tkl %u, code %u.%.2u, mid %u, Content type: %d",
+                message->version, message->type, message->token_len, message->code >> 5, message->code & 0x1F, message->mid, message->content_type);
+        LOG_ARG("Payload: %.*s", message->payload_len, message->payload);
         if (message->code >= COAP_GET && message->code <= COAP_DELETE)
         {
             uint32_t block_num = 0;
@@ -219,12 +224,12 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
             if (message->type == COAP_TYPE_CON)
             {
                 /* Reliable CON requests are answered with an ACK. */
-                coap_init_message(response, COAP_TYPE_ACK, CONTENT_2_05, message->mid);
+                coap_init_message(response, COAP_TYPE_ACK, COAP_205_CONTENT, message->mid);
             }
             else
             {
                 /* Unreliable NON requests are answered with a NON as well. */
-                coap_init_message(response, COAP_TYPE_NON, CONTENT_2_05, contextP->nextMID++);
+                coap_init_message(response, COAP_TYPE_NON, COAP_205_CONTENT, contextP->nextMID++);
             }
 
             /* mirror token */
@@ -236,7 +241,7 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
             /* get offset for blockwise transfers */
             if (coap_get_header_block2(message, &block_num, NULL, &block_size, &block_offset))
             {
-                LOG("Blockwise: block request %u (%u/%u) @ %u bytes\n", block_num, block_size, REST_MAX_CHUNK_SIZE, block_offset);
+                LOG_ARG("Blockwise: block request %u (%u/%u) @ %u bytes", block_num, block_size, REST_MAX_CHUNK_SIZE, block_offset);
                 block_size = MIN(block_size, REST_MAX_CHUNK_SIZE);
                 new_offset = block_offset;
             }
@@ -245,24 +250,23 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
             if (coap_error_code==NO_ERROR)
             {
                 /* Apply blockwise transfers. */
-                if ( IS_OPTION(message, COAP_OPTION_BLOCK1) && response->code<BAD_REQUEST_4_00 && !IS_OPTION(response, COAP_OPTION_BLOCK1) )
+                if ( IS_OPTION(message, COAP_OPTION_BLOCK1) && response->code<COAP_400_BAD_REQUEST && !IS_OPTION(response, COAP_OPTION_BLOCK1) )
                 {
-                    LOG("Block1 NOT IMPLEMENTED\n");
+                    LOG("Block1 NOT IMPLEMENTED");
 
-                    coap_error_code = NOT_IMPLEMENTED_5_01;
-                    coap_error_message = "NoBlock1Support";
+                    coap_error_code = COAP_501_NOT_IMPLEMENTED;
                 }
                 else if ( IS_OPTION(message, COAP_OPTION_BLOCK2) )
                 {
                     /* unchanged new_offset indicates that resource is unaware of blockwise transfer */
                     if (new_offset==block_offset)
                     {
-                        LOG("Blockwise: unaware resource with payload length %u/%u\n", response->payload_len, block_size);
+                        LOG_ARG("Blockwise: unaware resource with payload length %u/%u", response->payload_len, block_size);
                         if (block_offset >= response->payload_len)
                         {
-                            LOG("handle_incoming_data(): block_offset >= response->payload_len\n");
+                            LOG("handle_incoming_data(): block_offset >= response->payload_len");
 
-                            response->code = BAD_OPTION_4_02;
+                            response->code = COAP_402_BAD_OPTION;
                             coap_set_payload(response, "BlockOutOfScope", 15); /* a const char str[] and sizeof(str) produces larger code size */
                         }
                         else
@@ -274,14 +278,14 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
                     else
                     {
                         /* resource provides chunk-wise data */
-                        LOG("Blockwise: blockwise resource, new offset %d\n", (int) new_offset);
+                        LOG_ARG("Blockwise: blockwise resource, new offset %d", (int) new_offset);
                         coap_set_header_block2(response, block_num, new_offset!=-1 || response->payload_len > block_size, block_size);
                         if (response->payload_len > block_size) coap_set_payload(response, response->payload, block_size);
                     } /* if (resource aware of blockwise) */
                 }
                 else if (new_offset!=0)
                 {
-                    LOG("Blockwise: no block option for blockwise resource, using block size %u\n", REST_MAX_CHUNK_SIZE);
+                    LOG_ARG("Blockwise: no block option for blockwise resource, using block size %u", REST_MAX_CHUNK_SIZE);
 
                     coap_set_header_block2(response, 0, new_offset!=-1, REST_MAX_CHUNK_SIZE);
                     coap_set_payload(response, response->payload, MIN(response->payload_len, REST_MAX_CHUNK_SIZE));
@@ -309,13 +313,13 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
             case COAP_TYPE_NON:
             case COAP_TYPE_CON:
                 {
-                    bool done = transaction_handle_response(contextP, fromSessionH, message, response);
+                    bool done = transaction_handleResponse(contextP, fromSessionH, message, response);
 
 #ifdef LWM2M_SERVER_MODE
                     if (!done && IS_OPTION(message, COAP_OPTION_OBSERVE) &&
                         ((message->code == COAP_204_CHANGED) || (message->code == COAP_205_CONTENT)))
                     {
-                        done = handle_observe_notify(contextP, fromSessionH, message, response);
+                        done = observe_handleNotify(contextP, fromSessionH, message, response);
                     }
 #endif
                     if (!done && message->type == COAP_TYPE_CON )
@@ -329,11 +333,11 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
             case COAP_TYPE_RST:
                 /* Cancel possible subscriptions. */
                 handle_reset(contextP, fromSessionH, message);
-                transaction_handle_response(contextP, fromSessionH, message, NULL);
+                transaction_handleResponse(contextP, fromSessionH, message, NULL);
                 break;
 
             case COAP_TYPE_ACK:
-                transaction_handle_response(contextP, fromSessionH, message, NULL);
+                transaction_handleResponse(contextP, fromSessionH, message, NULL);
                 break;
 
             default:
@@ -344,17 +348,17 @@ void lwm2m_handle_packet(lwm2m_context_t * contextP,
     } /* if (parsed correctly) */
     else
     {
-        LOG("Message parsing failed %d\r\n", coap_error_code);
+        LOG_ARG("Message parsing failed %u.%2u", coap_error_code >> 5, coap_error_code & 0x1F);
     }
 
     if (coap_error_code != NO_ERROR && coap_error_code != COAP_IGNORE)
     {
-        LOG("ERROR %u: %s\n", coap_error_code, coap_error_message);
+        LOG_ARG("ERROR %u: %s", coap_error_code, coap_error_message);
 
         /* Set to sendable error code. */
         if (coap_error_code >= 192)
         {
-            coap_error_code = INTERNAL_SERVER_ERROR_5_00;
+            coap_error_code = COAP_500_INTERNAL_SERVER_ERROR;
         }
         /* Reuse input buffer for error message. */
         coap_init_message(message, COAP_TYPE_ACK, coap_error_code, message->mid);
@@ -368,16 +372,21 @@ coap_status_t message_send(lwm2m_context_t * contextP,
                            coap_packet_t * message,
                            void * sessionH)
 {
-    coap_status_t result = INTERNAL_SERVER_ERROR_5_00;
+    coap_status_t result = COAP_500_INTERNAL_SERVER_ERROR;
     uint8_t * pktBuffer;
     size_t pktBufferLen = 0;
     size_t allocLen;
 
-    allocLen = COAP_MAX_HEADER_SIZE + message->payload_len;
+    LOG("Entering");
+    allocLen = coap_serialize_get_size(message);
+    LOG_ARG("Size to allocate: %d", allocLen);
+    if (allocLen == 0) return COAP_500_INTERNAL_SERVER_ERROR;
+
     pktBuffer = (uint8_t *)lwm2m_malloc(allocLen);
     if (pktBuffer != NULL)
     {
         pktBufferLen = coap_serialize_message(message, pktBuffer);
+        LOG_ARG("coap_serialize_message() returned %d", pktBufferLen);
         if (0 != pktBufferLen)
         {
             result = lwm2m_buffer_send(sessionH, pktBuffer, pktBufferLen, contextP->userData);
