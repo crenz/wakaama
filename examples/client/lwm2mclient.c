@@ -188,18 +188,18 @@ void * lwm2m_connect_server(uint16_t secObjInstID,
   dtls_connection_t * newConnP = NULL;
   dataP = (client_data_t *)userData;
   lwm2m_object_t  * securityObj = dataP->securityObjP;
-  
+
   instance = LWM2M_LIST_FIND(dataP->securityObjP->instanceList, secObjInstID);
   if (instance == NULL) return NULL;
-  
-  
+
+
   newConnP = connection_create(dataP->connList, dataP->sock, securityObj, instance->id, dataP->lwm2mH, dataP->addressFamily);
   if (newConnP == NULL)
   {
       fprintf(stderr, "Connection creation failed.\n");
       return NULL;
   }
-  
+
   dataP->connList = newConnP;
   return (void *)newConnP;
 }
@@ -567,19 +567,19 @@ static void prv_add(char * buffer,
     objectP = get_test_object();
     if (objectP == NULL)
     {
-        fprintf(stdout, "Creating object 1024 failed.\r\n");
+        fprintf(stdout, "Creating object 31024 failed.\r\n");
         return;
     }
     res = lwm2m_add_object(lwm2mH, objectP);
     if (res != 0)
     {
-        fprintf(stdout, "Adding object 1024 failed: ");
+        fprintf(stdout, "Adding object 31024 failed: ");
         print_status(stdout, res);
         fprintf(stdout, "\r\n");
     }
     else
     {
-        fprintf(stdout, "Object 1024 added.\r\n");
+        fprintf(stdout, "Object 31024 added.\r\n");
     }
     return;
 }
@@ -590,16 +590,16 @@ static void prv_remove(char * buffer,
     lwm2m_context_t * lwm2mH = (lwm2m_context_t *)user_data;
     int res;
 
-    res = lwm2m_remove_object(lwm2mH, 1024);
+    res = lwm2m_remove_object(lwm2mH, 31024);
     if (res != 0)
     {
-        fprintf(stdout, "Removing object 1024 failed: ");
+        fprintf(stdout, "Removing object 31024 failed: ");
         print_status(stdout, res);
         fprintf(stdout, "\r\n");
     }
     else
     {
-        fprintf(stdout, "Object 1024 removed.\r\n");
+        fprintf(stdout, "Object 31024 removed.\r\n");
     }
     return;
 }
@@ -664,25 +664,23 @@ static void prv_display_objects(char * buffer,
 static void prv_display_backup(char * buffer,
         void * user_data)
 {
-    if (NULL != backupObjectArray) {
-        int i;
-        for (i = 0 ; i < BACKUP_OBJECT_COUNT ; i++) {
-            lwm2m_object_t * object = backupObjectArray[i];
-            if (NULL != object) {
-                switch (object->objID)
-                {
-                case LWM2M_SECURITY_OBJECT_ID:
-                    display_security_object(object);
-                    break;
-                case LWM2M_SERVER_OBJECT_ID:
-                    display_server_object(object);
-                    break;
-                default:
-                    break;
-                }
-            }
-        }
-    }
+   int i;
+   for (i = 0 ; i < BACKUP_OBJECT_COUNT ; i++) {
+       lwm2m_object_t * object = backupObjectArray[i];
+       if (NULL != object) {
+           switch (object->objID)
+           {
+           case LWM2M_SECURITY_OBJECT_ID:
+               display_security_object(object);
+               break;
+           case LWM2M_SERVER_OBJECT_ID:
+               display_server_object(object);
+               break;
+           default:
+               break;
+           }
+       }
+   }
 }
 
 static void prv_backup_objects(lwm2m_context_t * context)
@@ -795,9 +793,9 @@ void print_usage(void)
     fprintf(stdout, "  -t TIME\tSet the lifetime of the Client. Default: 300\r\n");
     fprintf(stdout, "  -b\t\tBootstrap requested.\r\n");
     fprintf(stdout, "  -c\t\tChange battery level over time.\r\n");
-#ifdef WITH_TINYDTLS    
+#ifdef WITH_TINYDTLS
     fprintf(stdout, "  -i STRING\tSet the device management or bootstrap server PSK identity. If not set use none secure mode\r\n");
-    fprintf(stdout, "  -s HEXSTRING\tSet the device management or bootstrap server Pre-Shared-Key. If not set use none secure mode\r\n");    
+    fprintf(stdout, "  -s HEXSTRING\tSet the device management or bootstrap server Pre-Shared-Key. If not set use none secure mode\r\n");
 #endif
     fprintf(stdout, "\r\n");
 }
@@ -852,8 +850,8 @@ int main(int argc, char *argv[])
             {"disp", "Display current objects/instances/resources", NULL, prv_display_objects, NULL},
             {"dump", "Dump an Object", "dump URI"
                                        "URI: uri of the Object or Instance such as /3/0, /1\r\n", prv_object_dump, NULL},
-            {"add", "Add support of object 1024", NULL, prv_add, NULL},
-            {"rm", "Remove support of object 1024", NULL, prv_remove, NULL},
+            {"add", "Add support of object 31024", NULL, prv_add, NULL},
+            {"rm", "Remove support of object 31024", NULL, prv_remove, NULL},
             {"quit", "Quit the client gracefully.", NULL, prv_quit, NULL},
             {"^C", "Quit the client abruptly (without sending a de-register message).", NULL, NULL, NULL},
 
@@ -914,7 +912,7 @@ int main(int argc, char *argv[])
             }
             psk = argv[opt];
             break;
-#endif						
+#endif
         case 'n':
             opt++;
             if (opt >= argc)
@@ -1110,7 +1108,7 @@ int main(int argc, char *argv[])
         fprintf(stderr, "lwm2m_init() failed\r\n");
         return -1;
     }
-	
+
 #ifdef WITH_TINYDTLS
     data.lwm2mH = lwm2mH;
 #endif
@@ -1174,12 +1172,12 @@ int main(int argc, char *argv[])
                 tv.tv_sec = reboot_time - tv_sec;
             }
         }
-        else if (batterylevelchanging) 
+        else if (batterylevelchanging)
         {
             update_battery_level(lwm2mH);
             tv.tv_sec = 5;
         }
-        else 
+        else
         {
             tv.tv_sec = 60;
         }
@@ -1311,7 +1309,7 @@ int main(int argc, char *argv[])
                          */
 #ifdef WITH_TINYDTLS
                         int result = connection_handle_packet(connP, buffer, numBytes);
-						if (0 != result)
+                        if (0 != result)
                         {
                              printf("error handling message %d\n",result);
                         }
@@ -1360,6 +1358,10 @@ int main(int argc, char *argv[])
      */
     if (g_quit == 1)
     {
+#ifdef WITH_TINYDTLS
+        free(pskBuffer);
+#endif
+
 #ifdef LWM2M_BOOTSTRAP
         close_backup_object();
 #endif
