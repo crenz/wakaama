@@ -1,0 +1,21 @@
+FROM resin/armv7hf-debian AS compiler
+
+RUN [ "cross-build-start" ]
+
+RUN apt-get update
+RUN apt-get -y install apt-utils
+RUN apt-get -y install make
+RUN apt-get -y install cmake autoconf
+RUN apt-get -y install gcc g++
+RUN apt-get -y install git
+COPY . /wakaama
+WORKDIR /wakaama/build-dtlsclient
+RUN cmake -DDTLS=1 ../examples/client
+RUN make
+
+RUN [ "cross-build-end" ]  
+
+
+FROM resin/rpi-raspbian 
+COPY --from=compiler /wakaama/build-dtlsclient/lwm2mclient . 
+
