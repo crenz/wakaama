@@ -532,6 +532,7 @@ syntax_error:
 static void update_battery_level(lwm2m_context_t * context)
 {
     static time_t next_change_time = 0;
+    static int batteryLevel = 100;
     time_t tv_sec;
 
     tv_sec = lwm2m_gettime();
@@ -542,18 +543,20 @@ static void update_battery_level(lwm2m_context_t * context)
         char value[15];
         int valueLength;
         lwm2m_uri_t uri;
-        int level = rand() % 100;
+//        int level = rand() % 100;
+        batteryLevel--;
 
-        if (0 > level) level = -level;
+        if (0 > batteryLevel) batteryLevel = 100;
         if (lwm2m_stringToUri("/3/0/9", 6, &uri))
         {
-            valueLength = sprintf(value, "%d", level);
-            fprintf(stderr, "New Battery Level: %d\n", level);
+            valueLength = sprintf(value, "%d", batteryLevel);
+            fprintf(stderr, "New Battery Level: %d\n", batteryLevel);
             handle_value_changed(context, &uri, value, valueLength);
         }
-        level = rand() % 20;
-        if (0 > level) level = -level;
-        next_change_time = tv_sec + level + 10;
+//        level = rand() % 20;
+//        if (0 > level) level = -level;
+//        next_change_time = tv_sec + level + 1;
+        next_change_time = 0; // force change on next step
     }
 }
 
@@ -1175,7 +1178,8 @@ int main(int argc, char *argv[])
         else if (batterylevelchanging)
         {
             update_battery_level(lwm2mH);
-            tv.tv_sec = 5;
+//            tv.tv_sec = 5;
+            tv.tv_sec = 1;
         }
         else
         {

@@ -478,6 +478,9 @@ dtls_connection_t * connection_create(dtls_connection_t * connList,
         port++;
     }
 
+    fprintf(stderr, "Opening DTLS connection to server at %s:%s\r\n", host, port);
+
+
     if (0 != getaddrinfo(host, port, &hints, &servinfo) || servinfo == NULL) return NULL;
 
     // we test the various addresses
